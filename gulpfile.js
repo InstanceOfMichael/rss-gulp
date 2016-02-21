@@ -1,197 +1,198 @@
-'use strict';
-// generated on 2016-02-08 using generator-gulp-bootstrap3 0.4.4
+/*jshint -W100*/
+require('dotenv').load();
 
-// Load plugins
-var gulp = require('gulp'),
-    sass = require('gulp-ruby-sass'),
-    autoprefixer = require('gulp-autoprefixer'),
-    minifycss = require('gulp-minify-css'),
-    uglify = require('gulp-uglify'),
-    imagemin = require('gulp-imagemin'),
-    rename = require('gulp-rename'),
-    del = require('del'),
-    concat = require('gulp-concat'),
-    notify = require('gulp-notify'),
-    cache = require('gulp-cache'),
-    include = require('gulp-include'),
-    ejs = require('gulp-ejs'),
-    gutil = require('gulp-util'),
-    revall = require('gulp-rev-all'),
-    livereload = require('gulp-livereload'),
-    gulpif = require('gulp-if'),
-    flatten = require('gulp-flatten'),
-    iconfont = require('gulp-iconfont'),
-    iconfontCss = require('gulp-iconfont-css'),
-    sprity = require('sprity');
-
-// Define paths
-var paths = {
-  scripts:   [
-      './node_modules/jquery/dist/jquery.js',
-      './node_modules/bootstrap-sass/assets/javascripts/bootstrap.js',
-      './src/js/*.js'
-  ],
-  styles:    ['./src/css/*.{scss,sass,css}'],
-  images:    ['./src/images/**', '!./src/images/sprite/**', '!./src/images/sprite/'],
-  templates: ['./src/templates/*.ejs']
+const paths = {
+    'dev': {
+        'less':   './src/less/',
+        'js':     './src/js/',
+        'vendor': './src/vendor',
+    },
+    'production': { // more like "output" than "production"
+        'css':   './dist/assets/css/',
+        'js':    './dist/assets/js/',
+        'fonts': './dist/assets/fonts/',
+    }
 };
+
+const gulp = require('gulp'),
+    less = require('gulp-less'),
+    minify = require('gulp-minify-css'),
+    concat = require('gulp-concat'),
+    uglify = require('gulp-uglify'),
+    rename = require('gulp-rename'),
+    notify = require('gulp-notify'),
+    replace = require('gulp-replace'),
+    es = require('event-stream'),
+    sourcemaps = require('gulp-sourcemaps'),
+    gulpBabel = require('gulp-babel'),
+    ll   = require('gulp-ll'),
+    plumber = require('gulp-plumber'),
+    streamSeries = require('stream-series')
+;
+rollbar = require('./gulp/rollbar');
+
+require('./gulp/put_plumber_in_gulp_src')(gulp,plumber,rollbar,notify);
+
+ll.tasks([
+    'js',
+    'css',
+    'icons',
+]);
+/*
+sudo npm install gulp-babel babel-preset-es2015 babel-preset-stage-0 -g
+*/
+var toES5 = function()
+{
+    return gulpBabel({
+        // @link https://babeljs.io/blog/2015/10/31/setting-up-babel-6/
+        // @link https://babeljs.io/docs/usage/options/
+        // @link http://babeljs.io/docs/plugins/preset-stage-0/
+        // @link http://babeljs.io/docs/plugins/preset-es2015/
+        presets: ["es2015", "stage-0"],
+        // plugins: ["transform-runtime"],
+        compact:false, // uglify will perform this task
+    });
+};
+
+process.env.ROLLBAR_PUBLIC_INSTANCE_ID = (function()
+{
+    // BG will mention if this is safe or not;
+    process.env.PUBLIC_INSTANCE_ID = process.env.PUBLIC_INSTANCE_ID||process.env.INSTANCE_ID||'';
+    var domain = (process.env.APP_DOMAIN+'').slice(-32);
+    var leftPad = ((process.env.ROLLBAR_PUBLIC_INSTANCE_ID||process.env.PUBLIC_INSTANCE_ID||process.env.INSTANCE_ID||domain||'')+'')
+        .replace(/[-._]/g,'')// remove slashes and underscores
+        ;
+
+    // leftPad = String(leftPad + Array(40).join('_')).slice(0,40);
+    leftPad = leftPad.slice(0,32);
+
+    // console.log({leftPad:leftPad});
+    return leftPad;
+})();
+process.env.ROLLBAR_ACCESS_TOKEN_JS=process.env.ROLLBAR_ACCESS_TOKEN_JS||'a00b663c5ace4c1384bd8e2c967b30f9';
 
 // CSS
 gulp.task('css', function() {
-  return sass(paths.styles, {
-    style: 'expanded',
-    loadPath: [
-      process.cwd() + '/src/css/partials',
-      process.cwd() + '/src/vendor',
-      process.cwd() + '/node_modules/bootstrap-sass/assets/stylesheets'
-    ]
-  })
-  .pipe(autoprefixer('last 2 version', 'safari 5', 'ie 8', 'ie 9', 'opera 12.1', 'ios 6', 'android 4'))
-  .pipe(concat('app.css'))
-  .pipe(gulp.dest('dist/assets/css'))
-  .pipe(rename({suffix: '.min'}))
-  .pipe(minifycss())
-  .pipe(gulp.dest('dist/assets/css'))
-  .pipe(notify({ message: 'CSS task complete' }));
+  var gritterStream = gulp.src([
+      paths.dev.less+'jquery.gritter.less'
+    ])
+    .pipe(sourcemaps.init({loadMaps: true}))
+    .pipe(less())
+    .pipe(replace('../images/','../img/gritter/'))
+    ;
+
+  var vendorLessStream = gulp.src([
+      paths.dev.less+'vendor.less',
+      paths.dev.less+'app.less',
+      // paths.dev.less+'app.css',
+    ])
+    .pipe(sourcemaps.init({loadMaps: true}))
+    .pipe(less())
+    ;
+  var vendorCssStream = gulp.src([
+      paths.dev.vendor+'bootstrap-toggle/css/bootstrap-toggle.css'
+    ])
+    .pipe(sourcemaps.init({loadMaps: true}))
+    ;
+
+  return es.merge(vendorLessStream,vendorCssStream,gritterStream)
+    .pipe(plumber())
+    .pipe(concat('app.css'))
+    .pipe(gulp.dest(paths.production.css))
+    .pipe(minify({keepSpecialComments:0}))
+    .pipe(rename({suffix: '.min'}))
+    .pipe(sourcemaps.write({includeContent: true}))
+    .pipe(gulp.dest(paths.production.css));
 });
 
-// Javascript
-gulp.task('js', function() {
-  return gulp.src(paths.scripts)
-    .pipe(include().on('error', gutil.log))
+gulp.task('js', function()
+{
+  const jsf = [
+    paths.dev.js+'/rollbar.js',
+    paths.dev.vendor+'rollbar/dist/rollbar.snippet.js',
+    paths.dev.vendor+'jquery/dist/jquery.js',
+    paths.dev.vendor+'es6-promise-polyfill/promise.js',
+    paths.dev.vendor+'jquery.gritter/js/jquery.gritter.js',
+    paths.dev.vendor+'kbw.countdown/jquery.countdown.js',
+    paths.dev.vendor+'moment/moment.js',
+    paths.dev.vendor+'livestampjs/livestamp.js',
+    paths.dev.vendor+'bootstrap/dist/js/bootstrap.js',
+    paths.dev.vendor+'bootstrap-datetimepicker/src/js/bootstrap-datetimepicker.js', //30 kb .min.js
+    paths.dev.vendor+'fancybox/source/jquery.fancybox.js',
+    paths.dev.vendor+'fancybox/source/helpers/jquery.fancybox-thumbs.js',
+    paths.dev.vendor+'bootstrap-responsive-tabs/js/responsive-tabs.js',
+    paths.dev.vendor+'bootstrap-toggle/js/bootstrap-toggle.js',
+    paths.dev.vendor+'jquery-serialize-object/jquery.serialize-object.js',
+    paths.dev.vendor+'jquery-throttle-debounce/jquery.ba-throttle-debounce.js',
+    paths.dev.vendor+'bootbox/bootbox.js',
+    paths.dev.vendor+'socket.io-client/socket.io.js',              //65kb .min.js
+    paths.dev.vendor+'sg-laravel-array-helpers/laravel_helpers.js',
+    paths.dev.vendor+'sg-laravel-array-helpers/spacegazebo_helpers.js',
+    paths.dev.vendor+'sg-laravel-message-bag/src/MessageBag.js',
+    paths.dev.js+'library/Array.unique.js',
+    paths.dev.js+'library/findModel.js',
+    paths.dev.js+'library/Function.bind.js',
+    paths.dev.js+'library/isEmpty.js',
+    paths.dev.js+'library/isInt.js',
+    paths.dev.js+'library/IE.CustomEvent.js',
+    paths.dev.js+'library/jQuery.exists.js',
+    paths.dev.js+'library/jQuery.getCursorPosition.js',
+    paths.dev.js+'library/jQuery.getModel.js',
+    paths.dev.js+'library/jQuery.outerHTML.js',
+    paths.dev.js+'library/Object.keys.js',
+    paths.dev.js+'library/objectMerge.js',
+    paths.dev.js+'library/phpjs.money_format.js',
+    paths.dev.js+'library/phpjs.setlocale.js',
+    paths.dev.js+'library/String.replaceAll.js',
+    paths.dev.js+'library/String.startsWith.js',
+    paths.dev.js+'alert.js',
+    paths.dev.js+'localstorage.js',
+    paths.dev.js+'selectall.js',
+  ];
+
+  var es5Stream = gulp.src(jsf,{base:'../templates/assets/'})
+    .pipe(sourcemaps.init({loadMaps: true}))
+    ;
+  var es6Stream = gulp.src([
+      paths.dev.js+'es6/AlertBag.js'
+  ],{base:'../templates/assets/'})
+    .pipe(sourcemaps.init({loadMaps: true}))
+    .pipe(toES5())
+    ;
+
+  return streamSeries(es5Stream,es6Stream)
+    .pipe(replace('process.env.ROLLBAR_ACCESS_TOKEN_JS',process.env.ROLLBAR_ACCESS_TOKEN_JS))
+    .pipe(replace('process.env.APP_ENV',process.env.APP_ENV))
+    .pipe(replace('glyphicon-ok','fa-check'))
+    .pipe(replace('glyphicon-remove','fa-times'))
+    .pipe(replace('glyphicon-time','fa-clock-o'))
+    .pipe(replace('glyphicon','fa'))
     .pipe(concat('app.js'))
-    .pipe(gulp.dest('dist/assets/js'))
-    .pipe(rename({ suffix: '.min' }))
-    .pipe(uglify().on('error', gutil.log))
-    .pipe(gulp.dest('dist/assets/js'))
-    .pipe(notify({ message: 'JS task complete' }));
+    .pipe(gulp.dest(paths.production.js))
+    .pipe(uglify())
+    .pipe(rename({suffix: '.min'}))
+    .pipe(sourcemaps.write({includeContent: true}))
+    .pipe(gulp.dest(paths.production.js))
+    ;
 });
 
-// Sprite generation
-gulp.task('sprites', function(cb) {
-  return sprity.src({
-    src: './src/images/sprite/*.png',
-    style: './_sprite.sass',
-    processor: 'sass',
-    'style-type': 'sass',
-    prefix: 'sprite',
-    dimension: [{
-      ratio: 1, dpi: 72
-    }, {
-      ratio: 2, dpi: 192
-    }],
-  }).on('error', function(err) {
-    gutil.log(err.toString());
-    cb();
-  })
-  .pipe(gulpif('*.png', gulp.dest('./src/images/'), gulp.dest('./src/css/partials/')))
+gulp.task('icons', function(){ 
+    return gulp.src(paths.dev.vendor + '/font-awesome/fonts/**.*') 
+        .pipe(gulp.dest(paths.production.fonts)); 
 });
 
-// Optimize images
-gulp.task('images', function() {
-  return gulp.src(paths.images)
-    .pipe(cache(imagemin({ optimizationLevel: 5, progressive: true, interlaced: true })))
-    .pipe(gulp.dest('dist/assets/images'))
-    .pipe(notify({ message: 'Images task complete' }));
+gulp.task('watch', function() {
+  gulp.watch(paths.dev.less + '/*.less', ['css']);
+  gulp.watch(paths.dev.js + '/*.js',     ['js']);
+  gulp.watch(paths.dev.js + '/es6/*.js', ['js']);
 });
 
-// Templates
-gulp.task('templates', function() {
-  return gulp.src(paths.templates)
-    .pipe(ejs().on('error', gutil.log))
-    .pipe(gulp.dest('dist'))
-    .pipe(notify({ message: 'Templates task complete' }));
-});
-
-// Clean up
-gulp.task('clean', function() {
-  return del(['dist/assets/css', 'dist/assets/js', 'dist/assets/images', 'dist/assets/fonts', 'dist/*.html']);
-});
-
-// Rev all files
-gulp.task('rev', function () {
-  gulp.src('dist/**')
-    .pipe(revall({ ignore: [/^\/favicon.ico$/g, '.html'] }))
-    .pipe(gulp.dest('rev'));
-});
-
-// Copy fonts
-gulp.task('fonts', function() {
-  gulp.src('src/**/*.{eot,svg,ttf,woff,woff2}')
-    .pipe(flatten())
-    .pipe(gulp.dest('dist/assets/fonts'));
-});
-
-// Create icon font
-var fontName = 'webicons';
-gulp.task('iconfont', function(){
-  gulp.src(['./src/images/icons/*.svg'])
-    .pipe(iconfontCss({
-      fontName: fontName,
-      targetPath: '../css/partials/_icons.scss',
-      fontPath: '../fonts/'
-    }))
-    .pipe(iconfont({
-      fontName: fontName
-     }))
-    .pipe(gulp.dest('./src/fonts'));
-});
-
-// Default task
-gulp.task('default', ['clean', 'sprites', 'iconfont'], function() {
-  gulp.start('css', 'js', 'images', 'templates', 'fonts');
-});
-
-// Setup connect server
-gulp.task('connect', function() {
-  var connect = require('connect');
-  var app = connect()
-      .use(require('connect-livereload')({ port: 35729 }))
-      .use(require('serve-static')('dist'))
-      .use(require('serve-index')('dist'));
-
-  require('http').createServer(app)
-    .listen(9000)
-    .on('listening', function() {
-      console.log('Started connect web server on http://localhost:9000');
-    });
-});
-
-// Serve
-gulp.task('serve', ['connect'], function() {
-  require('opn')('http://localhost:9000');
-});
-
-// Watch
-gulp.task('watch', ['connect', 'serve'], function() {
-
-  // Watch SASS files
-  gulp.watch('src/css/**/*.sass', ['css']);
-
-  // Watch JS files
-  gulp.watch('src/js/**/*.js', ['js']);
-
-  // Watch image files
-  gulp.watch(paths.images, ['images']);
-
-  // Watch iconfonts files
-  gulp.watch('./src/images/icons/*.svg', ['iconfont', 'fonts']);
-
-  // Watch sprite folder
-  gulp.watch('./src/images/sprite/*.png', ['sprites']);
-
-  // Watch template files
-  gulp.watch('./src/templates/**/*.ejs', ['templates']);
-
-  // Watch for fonts
-  gulp.watch('./src/**/*.{eot,svg,ttf,woff,woff2}', ['fonts']);
-
-  // Create LiveReload server
-  livereload({ start: true });
-
-  // Watch any files in assets folder reload on change
-  gulp.watch(['dist/assets/**', 'dist/*.html']).on('change', function(file) {
-    livereload.changed(file.path);
-  });
-
-});
+gulp.task('deploy', [
+  'js',
+  'css',
+  'icons',
+]);
+gulp.task('default', [
+  'deploy',
+  'watch'
+]);
