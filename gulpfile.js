@@ -23,10 +23,14 @@ var gulp = require('gulp'),
     iconfont = require('gulp-iconfont'),
     iconfontCss = require('gulp-iconfont-css'),
     sprity = require('sprity');
-    
+
 // Define paths
-var paths = {  
-  scripts:   ['./src/js/*.js'],
+var paths = {
+  scripts:   [
+      './node_modules/jquery/dist/jquery.js',
+      './node_modules/bootstrap-sass/assets/javascripts/bootstrap.js',
+      './src/js/*.js'
+  ],
   styles:    ['./src/css/*.{scss,sass,css}'],
   images:    ['./src/images/**', '!./src/images/sprite/**', '!./src/images/sprite/'],
   templates: ['./src/templates/*.ejs']
@@ -38,10 +42,12 @@ gulp.task('css', function() {
     style: 'expanded',
     loadPath: [
       process.cwd() + '/src/css/partials',
-      process.cwd() + '/src/vendor'
+      process.cwd() + '/src/vendor',
+      process.cwd() + '/node_modules/bootstrap-sass/assets/stylesheets'
     ]
   })
   .pipe(autoprefixer('last 2 version', 'safari 5', 'ie 8', 'ie 9', 'opera 12.1', 'ios 6', 'android 4'))
+  .pipe(concat('app.css'))
   .pipe(gulp.dest('dist/assets/css'))
   .pipe(rename({suffix: '.min'}))
   .pipe(minifycss())
@@ -53,6 +59,7 @@ gulp.task('css', function() {
 gulp.task('js', function() {
   return gulp.src(paths.scripts)
     .pipe(include().on('error', gutil.log))
+    .pipe(concat('app.js'))
     .pipe(gulp.dest('dist/assets/js'))
     .pipe(rename({ suffix: '.min' }))
     .pipe(uglify().on('error', gutil.log))
@@ -142,7 +149,7 @@ gulp.task('connect', function() {
       .use(require('connect-livereload')({ port: 35729 }))
       .use(require('serve-static')('dist'))
       .use(require('serve-index')('dist'));
-        
+
   require('http').createServer(app)
     .listen(9000)
     .on('listening', function() {
@@ -160,7 +167,7 @@ gulp.task('watch', ['connect', 'serve'], function() {
 
   // Watch SASS files
   gulp.watch('src/css/**/*.sass', ['css']);
-  
+
   // Watch JS files
   gulp.watch('src/js/**/*.js', ['js']);
 
@@ -169,16 +176,16 @@ gulp.task('watch', ['connect', 'serve'], function() {
 
   // Watch iconfonts files
   gulp.watch('./src/images/icons/*.svg', ['iconfont', 'fonts']);
-  
+
   // Watch sprite folder
   gulp.watch('./src/images/sprite/*.png', ['sprites']);
 
   // Watch template files
   gulp.watch('./src/templates/**/*.ejs', ['templates']);
-  
+
   // Watch for fonts
   gulp.watch('./src/**/*.{eot,svg,ttf,woff,woff2}', ['fonts']);
-  
+
   // Create LiveReload server
   livereload({ start: true });
 
